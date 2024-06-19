@@ -2,7 +2,7 @@ mod instructions;
 mod operands;
 
 use crate::cpu::instructions::{go, step};
-use crate::cpu::operands::{Imm16, Imm8, Reg16, Reg8};
+use crate::cpu::operands::{Imm16, Imm8, Indirect, Reg16, Reg8};
 use crate::peripherals;
 use crate::peripherals::Peripherals;
 use crate::registers;
@@ -141,5 +141,62 @@ impl IO16<Imm16> for Cpu {
 
     fn write16(&mut self, _: &mut Peripherals, _: Imm16, _: u16) -> Option<()> {
         unreachable!()
+    }
+}
+
+impl IO8<Indirect> for Cpu {
+    fn read8(&mut self, bus: &Peripherals, src: Indirect) -> Option<u8> {
+        step!(None, {
+            0: {
+                VAL8.store(match src {
+                    Indirect::BC => bus.read(self.regs.bc()),
+                    Indirect::DE => bus.read(self.regs.de()),
+                    Indirect::HL => bus.read(self.regs.hl()),
+                    Indirect::CFF => bus.read(0xFF00 | (self.regs.c as u16)),
+                    Indirect::HLD => {
+                        let addr = self.regs.hl();
+                        self.regs.write_hl(addr.wrapping_sub(1));
+                        bus.read(addr)
+                    },
+                    Indirect::HLI => {
+                        let addr = self.regs.hl();
+                        self.regs.write_hl(addr.wrapping_add(1));
+                        bus.read(addr)
+                    },
+                }, Relaxed);
+                go!(1);
+                return None;
+            },
+            1: {
+                go!(0);
+                return Some(VAL8.load(Relaxed));
+            },
+        });
+    }
+
+    fn write8(&mut self, bus: &mut Peripherals, dst: Indirect, val: u8) -> Option<()> {
+        step!(None, {
+            0: {
+                match dst {
+                    Indirect::BC => bus.write(self.regs.bc(), val),
+                    Indirect::DE => bus.write(self.regs.de(), val),
+                    Indirect::HL => bus.write(self.regs.hl(), val),
+                    Indirect::CFF => bus.write(0xFF00 | (self.regs.c as u16), val),
+                    Indirect::HLD => {
+                        let addr = self.regs.hl();
+                        self.regs.write_hl(addr.wrapping_sub(1));
+                        bus.write(addr, val);
+                    },
+                    Indirect::HLI => {
+                        let addr = self.regs.hl();
+                        self.regs.write_hl(addr.wrapping_add(1));
+                        bus.write(addr, val);
+                    },
+                }
+                go!(1);
+                return None;
+            },
+            1: return Some(go!(0)),
+        });
     }
 }
